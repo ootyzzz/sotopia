@@ -468,6 +468,7 @@ async def agenerate(
     structured_output: bool = False,
     bad_output_process_model: str = DEFAULT_BAD_OUTPUT_PROCESS_MODEL,
     use_fixed_model_version: bool = True,
+    verbose: bool = False,
 ) -> OutputType:
     input_variables = re.findall(
         r"(?<!{){([^{}]+)}(?!})", template
@@ -488,6 +489,50 @@ async def agenerate(
 
     if "format_instructions" not in input_values:
         input_values["format_instructions"] = output_parser.get_format_instructions()
+
+    # Verbose mode: display complete LLM input prompt
+    print(f"\nDEBUG - agenerate called with verbose={verbose}\n")
+    if verbose:
+        print(f"DEBUG - Inside verbose block, structured_output={structured_output}\n")
+        if structured_output:
+            # Handle structured output case
+            human_message_prompt = HumanMessagePromptTemplate(
+                prompt=PromptTemplate(
+                    template=template,
+                    input_variables=input_variables,
+                )
+            )
+            chat_prompt_template = ChatPromptTemplate.from_messages([human_message_prompt])
+            prompt_result = chat_prompt_template.invoke(input_values)
+            final_prompt = prompt_result.messages[0].content
+        else:
+            # Handle normal case
+            prompt_template = PromptTemplate(
+                template=template,
+                input_variables=input_variables,
+            )
+            final_prompt = prompt_template.format(**input_values)
+        
+        # Format and display the complete prompt information
+        print("\n" + "="*80)
+        print("COMPLETE LLM INPUT PROMPT:")
+        print("="*80)
+        print(f"Model: {model_name}")
+        print(f"Temperature: {temperature}")
+        print(f"Structured Output: {structured_output}")
+        print("-"*80)
+        print("Template:")
+        print(template)
+        print("-"*80)
+        print("Input Values:")
+        for key, value in input_values.items():
+            print(f"  {key}: {value}")
+        print("-"*80)
+        print("Final Prompt:")
+        print(final_prompt)
+        print("="*80 + "\n")
+    else:
+        print(f"DEBUG - verbose is False, skipping prompt display\n")
 
     if structured_output:
         assert (
@@ -610,6 +655,7 @@ async def agenerate_action(
     script_like: bool = False,
     bad_output_process_model: str = DEFAULT_BAD_OUTPUT_PROCESS_MODEL,
     use_fixed_model_version: bool = True,
+    verbose: bool = False,
 ) -> AgentAction:
     """
     Using langchain to generate an example episode
@@ -661,6 +707,7 @@ async def agenerate_action(
             temperature=temperature,
             bad_output_process_model=bad_output_process_model,
             use_fixed_model_version=use_fixed_model_version,
+            verbose=verbose,
         )
     except Exception:
         return AgentAction(action_type="none", argument="")
@@ -678,6 +725,7 @@ async def agenerate_script(
     single_step: bool = False,
     bad_output_process_model: str = DEFAULT_BAD_OUTPUT_PROCESS_MODEL,
     use_fixed_model_version: bool = True,
+    verbose: bool = False,
 ) -> tuple[ScriptInteractionReturnType, str]:
     """
     Using langchain to generate an the script interactions between two agent
@@ -713,6 +761,7 @@ async def agenerate_script(
                 temperature=temperature,
                 bad_output_process_model=bad_output_process_model,
                 use_fixed_model_version=use_fixed_model_version,
+                verbose=verbose,
             )
 
         else:
@@ -737,6 +786,7 @@ async def agenerate_script(
                 temperature=temperature,
                 bad_output_process_model=bad_output_process_model,
                 use_fixed_model_version=use_fixed_model_version,
+                verbose=verbose,
             )
     except Exception as e:
         # TODO raise(e) # Maybe we do not want to return anything?
@@ -849,6 +899,7 @@ async def agenerate_goal(
     background: str,
     bad_output_process_model: str = DEFAULT_BAD_OUTPUT_PROCESS_MODEL,
     use_fixed_model_version: bool = True,
+    verbose: bool = False,
 ) -> str:
     """
     Using langchain to generate the background
@@ -862,4 +913,5 @@ async def agenerate_goal(
         output_parser=StrOutputParser(),
         bad_output_process_model=bad_output_process_model,
         use_fixed_model_version=use_fixed_model_version,
+        verbose=verbose,
     )

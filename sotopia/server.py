@@ -113,10 +113,14 @@ async def arun_one_episode(
     json_in_script: bool = False,
     tag: str | None = None,
     push_to_db: bool = False,
+    verbose: bool = False,
 ) -> list[tuple[str, str, Message]]:
+    print(f"\nDEBUG - arun_one_episode called with verbose={verbose}\n")
     agents = Agents({agent.agent_name: agent for agent in agent_list})
     environment_messages = env.reset(agents=agents, omniscient=omniscient)
     agents.reset()
+    for agent in agent_list:
+        print(f"\nDEBUG - Agent {agent.agent_name} initialized with verbose={getattr(agent, 'verbose', 'NOT_SET')}\n")
 
     messages: list[list[tuple[str, str, Message]]] = []
 
@@ -136,6 +140,9 @@ async def arun_one_episode(
     while not done:
         # gather agent messages
         agent_messages: dict[str, AgentAction] = dict()
+        print(f"\nDEBUG - About to call asyncio.gather for agent actions\n")
+        for agent_name in env.agents:
+            print(f"\nDEBUG - Agent {agent_name} has verbose={getattr(agents[agent_name], 'verbose', 'NOT_SET')}\n")
         actions = await asyncio.gather(
             *[
                 agents[agent_name].aact(environment_messages[agent_name])
@@ -224,6 +231,7 @@ async def run_async_server(
     tag: str | None = None,
     push_to_db: bool = False,
     using_async: bool = True,
+    verbose: bool = False,
 ) -> list[list[tuple[str, str, Message]]]:
     """
     Doc incomplete
@@ -287,7 +295,7 @@ async def run_async_server(
             n_agent=len(agents_model_dict),
             env_params=env_params,
             agents_params=[
-                {"model_name": model_name} if model_name != "human" else {}
+                {"model_name": model_name, "verbose": verbose} if model_name != "human" else {"verbose": verbose}
                 for model_name in agents_model_dict.values()
             ],
         )
@@ -300,6 +308,7 @@ async def run_async_server(
             json_in_script=json_in_script,
             tag=tag,
             push_to_db=push_to_db,
+            verbose=verbose,
         )
         for env_agent_combo in env_agent_combo_iter
     ]

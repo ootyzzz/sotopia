@@ -107,6 +107,7 @@ def _iterate_env_agent_combo_not_in_db(
     model_names: dict[str, LLM_Name],
     env_ids: list[str] = [],
     tag: str | None = None,
+    verbose: bool = False,
 ) -> Generator[EnvAgentCombo[Observation, AgentAction], None, None]:
     """We iterate over each environment and return the **first** env-agent combo that is not in the database."""
     if not env_ids:
@@ -154,7 +155,7 @@ def _iterate_env_agent_combo_not_in_db(
             agent_profiles = [AgentProfile.get(id) for id in agent_ids]
 
             agents = [
-                LLMAgent(agent_profile=agent_profile, model_name=agent_model)
+                LLMAgent(agent_profile=agent_profile, model_name=agent_model, verbose=verbose)
                 for agent_profile, agent_model in zip(
                     agent_profiles,
                     [model_names["agent1"], model_names["agent2"]],
@@ -176,6 +177,7 @@ def run_async_server_in_batch(
     tag: str | None = None,
     verbose: bool = False,
 ) -> None:
+    print(f"\nDEBUG - run_async_server_in_batch called with verbose={verbose}\n")
     if not verbose:
         logger = logging.getLogger()
         logger.setLevel(logging.CRITICAL)
@@ -183,10 +185,10 @@ def run_async_server_in_batch(
         logger.removeHandler(rich_handler)
 
     # we cannot get the exact length of the generator, we just give an estimate of the length
-    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names)
+    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names, verbose=verbose)
     env_agent_combo_iter_length = sum(1 for _ in env_agent_combo_iter)
 
-    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names)
+    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names, verbose=verbose)
     env_agent_combo_batch: list[EnvAgentCombo[Observation, AgentAction]] = []
 
     while True:
@@ -200,11 +202,13 @@ def run_async_server_in_batch(
                 logging.info(
                     f"Running batch of {batch_size} episodes: {env_agent_combo_batch}"
                 )
+                print(f"\nDEBUG - About to call run_async_server with verbose={verbose}\n")
                 asyncio.run(
                     run_async_server(
                         model_dict=model_names,
                         sampler=BaseSampler[Observation, AgentAction](),
                         env_agent_combo_list=env_agent_combo_batch,
+                        verbose=verbose,
                     )
                 )
                 env_agent_combo_batch = []

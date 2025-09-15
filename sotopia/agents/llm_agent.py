@@ -29,6 +29,7 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
         agent_profile: AgentProfile | None = None,
         model_name: str = "gpt-4o-mini",
         script_like: bool = False,
+        verbose: bool = False,
     ) -> None:
         super().__init__(
             agent_name=agent_name,
@@ -37,6 +38,7 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
         )
         self.model_name = model_name
         self.script_like = script_like
+        self.verbose = verbose
 
     @property
     def goal(self) -> str:
@@ -57,18 +59,22 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
 
     async def aact(self, obs: Observation) -> AgentAction:
         self.recv_message("Environment", obs)
+        print(f"\nDEBUG - LLMAgent.aact called with verbose={self.verbose}\n")
 
         if self._goal is None:
+            print(f"\nDEBUG - About to call agenerate_goal with verbose={self.verbose}\n")
             self._goal = await agenerate_goal(
                 self.model_name,
                 background=self.inbox[0][
                     1
                 ].to_natural_language(),  # Only consider the first message for now
+                verbose=self.verbose,
             )
 
         if len(obs.available_actions) == 1 and "none" in obs.available_actions:
             return AgentAction(action_type="none", argument="")
         else:
+            print(f"\nDEBUG - About to call agenerate_action with verbose={self.verbose}\n")
             action = await agenerate_action(
                 self.model_name,
                 history="\n".join(f"{y.to_natural_language()}" for x, y in self.inbox),
@@ -77,6 +83,7 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
                 agent=self.agent_name,
                 goal=self.goal,
                 script_like=self.script_like,
+                verbose=self.verbose,
             )
             # Temporary fix for mixtral-moe model for incorrect generation format
             if "Mixtral-8x7B-Instruct-v0.1" in self.model_name:
@@ -102,11 +109,13 @@ class ScriptWritingAgent(LLMAgent):
         model_name: str = "gpt-4o-mini",
         agent_names: list[str] = [],
         background: ScriptBackground | None = None,
+        verbose: bool = False,
     ) -> None:
         super().__init__(
             agent_name=agent_name,
             uuid_str=uuid_str,
             agent_profile=agent_profile,
+            verbose=verbose,
         )
         self.model_name = model_name
         self.agent_names = agent_names
@@ -126,6 +135,7 @@ class ScriptWritingAgent(LLMAgent):
             history=history,
             agent_name=self.agent_name,
             single_step=True,
+            verbose=self.verbose,
         )
         returned_action = cast(AgentAction, action[1][0][1])
         return returned_action
