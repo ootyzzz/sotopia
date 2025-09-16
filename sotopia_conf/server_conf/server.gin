@@ -6,7 +6,7 @@ import sotopia.samplers as samplers
 ACTION_ORDER="round-robin"
 TAG=None
 PUSH_TO_DB=False
-OMNISCIENT=False
+VIS_GOAL="none"
 
 server.run_async_server:
     model_dict={"env": "gpt-4", "agent1": "gpt-4o-mini", "agent2": "gpt-3.5-turbo"}
@@ -14,5 +14,5 @@ server.run_async_server:
     push_to_db=%PUSH_TO_DB
     using_async=True
     tag=%TAG
-    omniscient=%OMNISCIENT
+    vis_goal=%VIS_GOAL
     sampler=@samplers.UniformSampler()

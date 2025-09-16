@@ -14,6 +14,12 @@ from sotopia.messages import AgentAction, Observation
 from sotopia.messages.message_classes import ScriptBackground
 
 
+def debug_print(message: str, verbose: bool = False) -> None:
+    """统一的调试输出函数"""
+    if verbose:
+        print(f"DEBUG - {message}")
+
+
 async def ainput(prompt: str = "") -> str:
     with ThreadPoolExecutor(1, "ainput") as executor:
         return (
@@ -59,10 +65,10 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
 
     async def aact(self, obs: Observation) -> AgentAction:
         self.recv_message("Environment", obs)
-        print(f"\nDEBUG - LLMAgent.aact called with verbose={self.verbose}\n")
+        debug_print(f"LLMAgent.aact called with verbose={self.verbose}", self.verbose)
 
         if self._goal is None:
-            print(f"\nDEBUG - About to call agenerate_goal with verbose={self.verbose}\n")
+            debug_print(f"About to call agenerate_goal with verbose={self.verbose}", self.verbose)
             self._goal = await agenerate_goal(
                 self.model_name,
                 background=self.inbox[0][
@@ -74,7 +80,7 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
         if len(obs.available_actions) == 1 and "none" in obs.available_actions:
             return AgentAction(action_type="none", argument="")
         else:
-            print(f"\nDEBUG - About to call agenerate_action with verbose={self.verbose}\n")
+            debug_print(f"About to call agenerate_action with verbose={self.verbose}", self.verbose)
             action = await agenerate_action(
                 self.model_name,
                 history="\n".join(f"{y.to_natural_language()}" for x, y in self.inbox),

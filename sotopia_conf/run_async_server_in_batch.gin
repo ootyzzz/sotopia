@@ -7,6 +7,7 @@ AGENT1_MODEL="gpt-3.5-turbo"
 AGENT2_MODEL="gpt-3.5-turbo"
 VERBOSE=False
 TAG_TO_CHECK_EXISTING_EPISODES=None
+VIS_GOAL="none"
 
 MODEL_NAMES={"env": %ENV_MODEL, "agent1": %AGENT1_MODEL, "agent2": %AGENT2_MODEL}
 ENV_IDS=%gin.REQUIRED
@@ -17,7 +18,9 @@ main_script.run_async_server_in_batch:
     model_names=%MODEL_NAMES
     verbose=%VERBOSE
     tag=%TAG
+    vis_goal=%VIS_GOAL
 
 main_script._iterate_env_agent_combo_not_in_db:
     env_ids=%ENV_IDS
     tag=%TAG_TO_CHECK_EXISTING_EPISODES
+    vis_goal=%VIS_GOAL

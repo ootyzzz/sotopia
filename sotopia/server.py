@@ -31,6 +31,13 @@ from sotopia.messages.message_classes import (
     ScriptEnvironmentResponse,
 )
 from sotopia.samplers import BaseSampler, EnvAgentCombo
+from sotopia.visibility.goal_visibility import GoalVisibilitySystem
+
+
+def debug_print(message: str, verbose: bool = False) -> None:
+    """统一的调试输出函数"""
+    if verbose:
+        print(f"DEBUG - {message}")
 
 
 @beartype
@@ -114,13 +121,18 @@ async def arun_one_episode(
     tag: str | None = None,
     push_to_db: bool = False,
     verbose: bool = False,
+    vis_goal: str = "none",
 ) -> list[tuple[str, str, Message]]:
-    print(f"\nDEBUG - arun_one_episode called with verbose={verbose}\n")
+    debug_print(f"arun_one_episode called with verbose={verbose}", verbose)
+    # Initialize GoalVisibilitySystem
+    visibility_system = GoalVisibilitySystem(vis_goal, verbose=verbose)
+    debug_print(f"GoalVisibilitySystem initialized with mode: {vis_goal}", verbose)
+    
     agents = Agents({agent.agent_name: agent for agent in agent_list})
     environment_messages = env.reset(agents=agents, omniscient=omniscient)
     agents.reset()
     for agent in agent_list:
-        print(f"\nDEBUG - Agent {agent.agent_name} initialized with verbose={getattr(agent, 'verbose', 'NOT_SET')}\n")
+        debug_print(f"Agent {agent.agent_name} initialized with verbose={getattr(agent, 'verbose', 'NOT_SET')}", verbose)
 
     messages: list[list[tuple[str, str, Message]]] = []
 
@@ -133,22 +145,49 @@ async def arun_one_episode(
         ]
     )
     # set goal for agents
+    all_goals = {agent_name: env.profile.agent_goals[index] for index, agent_name in enumerate(env.agents)}
+    debug_print(f"All goals: {all_goals}", verbose)
     for index, agent_name in enumerate(env.agents):
-        agents[agent_name].goal = env.profile.agent_goals[index]
+        # 使用新的SToM系统
+        own_goal, stom_section = visibility_system.get_agent_goals_and_stom(agent_name, all_goals)
+        
+        # 设置代理的目标（只包含自己的目标）
+        agents[agent_name].goal = own_goal
+        
+        # 设置SToM信息（如果代理支持的话）
+        if hasattr(agents[agent_name], 'stom_info'):
+            agents[agent_name].stom_info = stom_section
+        else:
+            # 临时方案：将SToM信息添加到goal中，用特殊分隔符分开
+            if stom_section:
+                agents[agent_name].goal = f"{own_goal}|||STOM_SECTION|||{stom_section}"
+        
+        debug_print(f"Agent {agent_name} assigned goal: {own_goal}", verbose)
+        debug_print(f"Agent {agent_name} SToM section: {stom_section}", verbose)
     rewards: list[list[float]] = []
     reasons: list[str] = []
     while not done:
         # gather agent messages
         agent_messages: dict[str, AgentAction] = dict()
-        print(f"\nDEBUG - About to call asyncio.gather for agent actions\n")
+        debug_print(f"About to call asyncio.gather for agent actions", verbose)
         for agent_name in env.agents:
-            print(f"\nDEBUG - Agent {agent_name} has verbose={getattr(agents[agent_name], 'verbose', 'NOT_SET')}\n")
-        actions = await asyncio.gather(
-            *[
-                agents[agent_name].aact(environment_messages[agent_name])
-                for agent_name in env.agents
-            ]
-        )
+            debug_print(f"Agent {agent_name} has verbose={getattr(agents[agent_name], 'verbose', 'NOT_SET')}", verbose)
+        
+        # Call each agent individually to better track which one fails
+        actions = []
+        for agent_name in env.agents:
+            debug_print(f"Starting action generation for agent: {agent_name}", verbose)
+            try:
+                action = await agents[agent_name].aact(environment_messages[agent_name])
+                debug_print(f"Agent {agent_name} action completed: {action}", verbose)
+                actions.append(action)
+            except Exception as e:
+                debug_print(f"Agent {agent_name} action FAILED with exception: {e}", verbose)
+                import traceback
+                traceback.print_exc()
+                actions.append(AgentAction(action_type="none", argument=""))
+                
+        debug_print(f"All agent actions completed, total: {len(actions)}", verbose)
         if script_like:
             # manually mask one message
             agent_mask = env.action_mask
@@ -232,6 +271,7 @@ async def run_async_server(
     push_to_db: bool = False,
     using_async: bool = True,
     verbose: bool = False,
+    vis_goal: str = "none",
 ) -> list[list[tuple[str, str, Message]]]:
     """
     Doc incomplete
@@ -309,6 +349,7 @@ async def run_async_server(
             tag=tag,
             push_to_db=push_to_db,
             verbose=verbose,
+            vis_goal=vis_goal,
         )
         for env_agent_combo in env_agent_combo_iter
     ]

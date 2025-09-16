@@ -35,6 +35,13 @@ from sotopia.samplers import (
 from sotopia.server import run_async_server
 from sotopia_conf.gin_utils import parse_gin_flags, run
 
+
+def debug_print(message: str, verbose: bool = False) -> None:
+    """统一的调试输出函数"""
+    if verbose:
+        print(f"DEBUG - {message}")
+
+
 _DEFAULT_GIN_SEARCH_PATHS = [
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ]
@@ -102,12 +109,19 @@ def _sample_env_agent_combo_and_push_to_db(env_id: str) -> None:
         ).save()
 
 
+def debug_print(message: str, verbose: bool = False) -> None:
+    """统一的调试输出函数"""
+    if verbose:
+        print(f"DEBUG - {message}")
+
+
 @gin.configurable
 def _iterate_env_agent_combo_not_in_db(
     model_names: dict[str, LLM_Name],
     env_ids: list[str] = [],
     tag: str | None = None,
     verbose: bool = False,
+    vis_goal: str = "none",
 ) -> Generator[EnvAgentCombo[Observation, AgentAction], None, None]:
     """We iterate over each environment and return the **first** env-agent combo that is not in the database."""
     if not env_ids:
@@ -176,8 +190,9 @@ def run_async_server_in_batch(
     },
     tag: str | None = None,
     verbose: bool = False,
+    vis_goal: str = "none",
 ) -> None:
-    print(f"\nDEBUG - run_async_server_in_batch called with verbose={verbose}\n")
+    debug_print(f"run_async_server_in_batch called with verbose={verbose}", verbose)
     if not verbose:
         logger = logging.getLogger()
         logger.setLevel(logging.CRITICAL)
@@ -185,10 +200,10 @@ def run_async_server_in_batch(
         logger.removeHandler(rich_handler)
 
     # we cannot get the exact length of the generator, we just give an estimate of the length
-    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names, verbose=verbose)
+    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names, verbose=verbose, vis_goal=vis_goal)
     env_agent_combo_iter_length = sum(1 for _ in env_agent_combo_iter)
 
-    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names, verbose=verbose)
+    env_agent_combo_iter = _iterate_env_agent_combo_not_in_db(model_names=model_names, verbose=verbose, vis_goal=vis_goal)
     env_agent_combo_batch: list[EnvAgentCombo[Observation, AgentAction]] = []
 
     while True:
@@ -202,13 +217,13 @@ def run_async_server_in_batch(
                 logging.info(
                     f"Running batch of {batch_size} episodes: {env_agent_combo_batch}"
                 )
-                print(f"\nDEBUG - About to call run_async_server with verbose={verbose}\n")
+                debug_print(f"About to call run_async_server with verbose={verbose}", verbose)
                 asyncio.run(
                     run_async_server(
                         model_dict=model_names,
                         sampler=BaseSampler[Observation, AgentAction](),
                         env_agent_combo_list=env_agent_combo_batch,
-                        verbose=verbose,
+                        vis_goal=vis_goal,  # Ensure vis_goal is passed
                     )
                 )
                 env_agent_combo_batch = []
