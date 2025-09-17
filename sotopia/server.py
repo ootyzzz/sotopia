@@ -25,19 +25,13 @@ from sotopia.envs.evaluators import (
     unweighted_aggregate_evaluate,
 )
 from sotopia.generation_utils.generate import LLM_Name, agenerate_script
+from sotopia.goal_visibility import GoalVisibilitySystem
 from sotopia.messages import AgentAction, Message, Observation
 from sotopia.messages.message_classes import (
     ScriptBackground,
     ScriptEnvironmentResponse,
 )
 from sotopia.samplers import BaseSampler, EnvAgentCombo
-from sotopia.visibility.goal_visibility import GoalVisibilitySystem
-
-
-def debug_print(message: str, verbose: bool = False) -> None:
-    """统一的调试输出函数"""
-    if verbose:
-        print(f"DEBUG - {message}")
 
 
 @beartype
@@ -123,16 +117,21 @@ async def arun_one_episode(
     verbose: bool = False,
     vis_goal: str = "none",
 ) -> list[tuple[str, str, Message]]:
-    debug_print(f"arun_one_episode called with verbose={verbose}", verbose)
-    # Initialize GoalVisibilitySystem
-    visibility_system = GoalVisibilitySystem(vis_goal, verbose=verbose)
-    debug_print(f"GoalVisibilitySystem initialized with mode: {vis_goal}", verbose)
-    
     agents = Agents({agent.agent_name: agent for agent in agent_list})
     environment_messages = env.reset(agents=agents, omniscient=omniscient)
     agents.reset()
+    
+    # Create goal visibility system
+    goal_visibility_system = GoalVisibilitySystem(vis_goal_mode=vis_goal, verbose=verbose)
+    
+    # Set agent order for proper SToM assignment
+    agent_names = list(env.agents)
+    goal_visibility_system.set_agent_order(agent_names)
+    
     for agent in agent_list:
-        debug_print(f"Agent {agent.agent_name} initialized with verbose={getattr(agent, 'verbose', 'NOT_SET')}", verbose)
+        # Pass goal_visibility_system to LLMAgent if it's an LLMAgent
+        if isinstance(agent, LLMAgent):
+            agent.goal_visibility_system = goal_visibility_system
 
     messages: list[list[tuple[str, str, Message]]] = []
 
@@ -145,49 +144,40 @@ async def arun_one_episode(
         ]
     )
     # set goal for agents
-    all_goals = {agent_name: env.profile.agent_goals[index] for index, agent_name in enumerate(env.agents)}
-    debug_print(f"All goals: {all_goals}", verbose)
     for index, agent_name in enumerate(env.agents):
-        # 使用新的SToM系统
-        own_goal, stom_section = visibility_system.get_agent_goals_and_stom(agent_name, all_goals)
-        
-        # 设置代理的目标（只包含自己的目标）
-        agents[agent_name].goal = own_goal
-        
-        # 设置SToM信息（如果代理支持的话）
-        if hasattr(agents[agent_name], 'stom_info'):
-            agents[agent_name].stom_info = stom_section
-        else:
-            # 临时方案：将SToM信息添加到goal中，用特殊分隔符分开
-            if stom_section:
-                agents[agent_name].goal = f"{own_goal}|||STOM_SECTION|||{stom_section}"
-        
-        debug_print(f"Agent {agent_name} assigned goal: {own_goal}", verbose)
-        debug_print(f"Agent {agent_name} SToM section: {stom_section}", verbose)
+        agents[agent_name].goal = env.profile.agent_goals[index]
+    
+    # Initialize SToM for agents based on who has extra visibility
+    scenario_description = env.profile.scenario if hasattr(env.profile, 'scenario') else "Social interaction scenario"
+    
+    if len(agent_names) >= 2:
+        # Check each agent and initialize SToM only if they have extra visibility
+        for agent_name in agent_names:
+            if goal_visibility_system.agent_has_stom(agent_name):
+                partner_name = agent_names[1] if agent_name == agent_names[0] else agent_names[0]
+                await goal_visibility_system.initialize_stom_for_agent(
+                    agent_name=agent_name,
+                    partner_name=partner_name, 
+                    scenario_description=scenario_description,
+                    conversation_context=""
+                )
+                if verbose:
+                    print(f"🧠 SToM: Initialized for {agent_name} (has extra visibility)")
     rewards: list[list[float]] = []
     reasons: list[str] = []
     while not done:
         # gather agent messages
         agent_messages: dict[str, AgentAction] = dict()
-        debug_print(f"About to call asyncio.gather for agent actions", verbose)
-        for agent_name in env.agents:
-            debug_print(f"Agent {agent_name} has verbose={getattr(agents[agent_name], 'verbose', 'NOT_SET')}", verbose)
         
-        # Call each agent individually to better track which one fails
-        actions = []
-        for agent_name in env.agents:
-            debug_print(f"Starting action generation for agent: {agent_name}", verbose)
-            try:
-                action = await agents[agent_name].aact(environment_messages[agent_name])
-                debug_print(f"Agent {agent_name} action completed: {action}", verbose)
-                actions.append(action)
-            except Exception as e:
-                debug_print(f"Agent {agent_name} action FAILED with exception: {e}", verbose)
-                import traceback
-                traceback.print_exc()
-                actions.append(AgentAction(action_type="none", argument=""))
-                
-        debug_print(f"All agent actions completed, total: {len(actions)}", verbose)
+        # Save current action mask before astep (will be updated after astep)
+        current_action_mask = env.action_mask.copy() if hasattr(env, 'action_mask') else None
+        
+        actions = await asyncio.gather(
+            *[
+                agents[agent_name].aact(environment_messages[agent_name])
+                for agent_name in env.agents
+            ]
+        )
         if script_like:
             # manually mask one message
             agent_mask = env.action_mask
@@ -202,8 +192,72 @@ async def arun_one_episode(
         # actions = cast(list[AgentAction], actions)
         for idx, agent_name in enumerate(env.agents):
             agent_messages[agent_name] = actions[idx]
-
             messages[-1].append((agent_name, "Environment", agent_messages[agent_name]))
+
+        # Update SToM after agent actions (for agents with extra visibility)
+        if vis_goal in ["agent1", "agent2", "both", "stom"]:
+            agent_names = list(env.agents)
+            if len(agent_names) >= 2:
+                # Build conversation context from messages (filter out "did nothing" actions)
+                all_messages = [
+                    f"{msg[0]}: {msg[2].to_natural_language()}" 
+                    for msg_group in messages 
+                    for msg in msg_group
+                    if msg[0] != "Environment"
+                ]
+                
+                # Filter out "did nothing" messages
+                filtered_messages = []
+                for msg in all_messages:
+                    msg_lower = msg.lower()
+                    if not ("did nothing" in msg_lower or "no action" in msg_lower or msg.endswith(": ")):
+                        filtered_messages.append(msg)
+                
+                conversation_context = "\n".join(filtered_messages)
+                
+                # Update each agent's SToM about their partner's action (only if they have extra visibility)
+                current_turn = len(messages) - 1  # Current turn number (0-indexed)
+                for idx, agent_name in enumerate(agent_names):
+                    if goal_visibility_system.agent_has_stom(agent_name):  # Only update if agent has extra visibility
+                        partner_name = agent_names[1 - idx]  # Get the other agent
+                        partner_idx = 1 - idx  # Partner's index in the agent list
+                        
+                        if partner_name in agent_messages:
+                            # Check if partner's action was masked (using the action mask from BEFORE astep)
+                            partner_action_was_masked = False
+                            if current_action_mask and hasattr(env, 'action_order'):
+                                if env.action_order in ["round-robin", "random"]:
+                                    partner_action_was_masked = not current_action_mask[partner_idx]
+                            
+                            # Only update SToM if partner took a real action (not masked and not "did nothing")
+                            partner_action = agent_messages[partner_name]
+                            partner_action_str = partner_action.to_natural_language()
+                            
+                            # Check if it's a meaningful action (not "did nothing" or similar)
+                            is_meaningful_action = True
+                            if partner_action_str:
+                                action_lower = partner_action_str.lower().strip()
+                                if ("did nothing" in action_lower or 
+                                    "no action" in action_lower or 
+                                    action_lower in ["", "none"] or
+                                    action_lower.endswith(": ")):
+                                    is_meaningful_action = False
+                            else:
+                                is_meaningful_action = False
+                            
+                            if not partner_action_was_masked and is_meaningful_action:
+                                await goal_visibility_system.update_stom_for_agent(
+                                    agent_name=agent_name,
+                                    partner_name=partner_name,
+                                    new_partner_action=partner_action_str,
+                                    conversation_context=conversation_context,
+                                    turn_number=current_turn
+                                )
+                            elif verbose:
+                                if partner_action_was_masked:
+                                    print(f"🧠 SToM: Skipping update - {partner_name} action was masked in {env.action_order} mode")
+                                else:
+                                    print(f"🧠 SToM: Skipping update - {partner_name} took non-meaningful action: '{partner_action_str}'")
 
         # send agent messages to environment
         (

@@ -36,11 +36,6 @@ from .langchain_callback_handler import LoggingCallbackHandler
 log = logging.getLogger("generate")
 logging_handler = LoggingCallbackHandler("langchain")
 
-def debug_print(message: str, verbose: bool = False) -> None:
-    """统一的调试输出函数"""
-    if verbose:
-        print(f"DEBUG - {message}")
-
 LLM_Name = Literal[
     "together_ai/meta-llama/Llama-2-7b-chat-hf",
     "together_ai/meta-llama/Llama-2-70b-chat-hf",
@@ -478,8 +473,6 @@ async def agenerate(
     input_variables = re.findall(
         r"(?<!{){([^{}]+)}(?!})", template
     )  # Add negative lookbehind and lookahead to avoid matching {{}}; note that {ab{ab}ab} will not be matched
-    debug_print(f"agenerate extracted input_variables: {input_variables}", verbose)
-    debug_print(f"agenerate input_values.keys(): {list(input_values.keys())}", verbose)
     assert (
         set(input_variables) == set(list(input_values.keys()) + ["format_instructions"])
         or set(input_variables) == set(list(input_values.keys()))
@@ -499,21 +492,36 @@ async def agenerate(
 
     # Verbose mode: display complete LLM input prompt
     if verbose:
-        debug_print(f"agenerate called with verbose={verbose}", verbose)
-        debug_print(f"agenerate model_name: {model_name}", verbose)
-        debug_print(f"agenerate input_values keys: {input_values.keys()}", verbose)
-        debug_print(f"agenerate agent: {input_values.get('agent', 'UNKNOWN')}", verbose)
-        # Generate the final prompt
-        prompt_template = PromptTemplate(
-            template=template,
-            input_variables=input_variables,
-        )
-        final_prompt = prompt_template.format(**input_values)
-        # Only display the final prompt
-        print("\nFinal Prompt:\n")
+        if structured_output:
+            # Handle structured output case
+            human_message_prompt = HumanMessagePromptTemplate(
+                prompt=PromptTemplate(
+                    template=template,
+                    input_variables=input_variables,
+                )
+            )
+            chat_prompt_template = ChatPromptTemplate.from_messages([human_message_prompt])
+            prompt_result = chat_prompt_template.invoke(input_values)
+            final_prompt = prompt_result.messages[0].content
+        else:
+            # Handle normal case
+            prompt_template = PromptTemplate(
+                template=template,
+                input_variables=input_variables,
+            )
+            final_prompt = prompt_template.format(**input_values)
+        
+        # Format and display the complete prompt information
+        print("\n" + "="*80)
+        print("COMPLETE LLM INPUT PROMPT:")
+        print("="*80)
+        print(f"Model: {model_name}")
+        print(f"Temperature: {temperature}")
+        print(f"Structured Output: {structured_output}")
+        print("-"*80)
+        print("Final Prompt:")
         print(final_prompt)
-    else:
-        debug_print("verbose is False, skipping prompt display", verbose)
+        print("="*80 + "\n")
 
     if structured_output:
         assert (
@@ -542,10 +550,7 @@ async def agenerate(
         casted_result = cast(OutputType, result)
         return casted_result
 
-    debug_print(f"agenerate about to call chain.ainvoke for agent: {input_values.get('agent', 'UNKNOWN')}", verbose)
     result = await chain.ainvoke(input_values, config={"callbacks": [logging_handler]})
-    debug_print(f"agenerate received result from LLM for agent: {input_values.get('agent', 'UNKNOWN')}", verbose)
-    debug_print(f"agenerate result type: {type(result)}, content: {str(result)[:200]}...", verbose)
     try:
         parsed_result = output_parser.invoke(result)
     except Exception as e:
@@ -562,7 +567,11 @@ async def agenerate(
             use_fixed_model_version=use_fixed_model_version,
         )
         parsed_result = output_parser.invoke(reformat_parsed_result)
-    log.info(f"Generated result: {parsed_result}")
+    
+
+    # Only log result in verbose mode to avoid duplication
+    if verbose:
+        print(f"agent output: \n{parsed_result}")
     return parsed_result
 
 
@@ -648,9 +657,9 @@ async def agenerate_action(
         if script_like:
             # model as playwright
             template = """
-                Now you are a famous playwright, your task is to continue writing one turn for agent {agent} under a given background and history to help {agent} reach their social goal. Please continue the script based on the previous turns. You can only generate one turn at a time.
-                You can find the agent's background and goal in the 'Here is the context of the interaction' field.
-                You should try your best to achieve the agent's goal in a way that align with their character traits.
+                Now you are a famous playwright, your task is to continue writing one turn for agent {agent} under a given background and history to help {agent} reach social goal. Please continue the script based on the previous turns. You can only generate one turn at a time.
+                You can find {agent}'s background and goal in the 'Here is the context of the interaction' field.
+                You should try your best to achieve {agent}'s goal in a way that align with their character traits.
                 Additionally, maintaining the conversation's naturalness and realism is essential (e.g., do not repeat what other people has already said before).
                 {history}.
                 The script has proceeded to Turn #{turn_number}. Current available action types are
@@ -663,17 +672,11 @@ async def agenerate_action(
             """
         else:
             # Normal case, model as agent
-            # 检查goal中是否包含SToM信息
-            if "|||STOM_SECTION|||" in goal:
-                actual_goal, stom_section = goal.split("|||STOM_SECTION|||", 1)
-                template = """
-                Imagine you are {agent}, your task is to act/speak as {agent} would, keeping in mind your social goal.
-                
-                Your goal: {goal}
-                
-                {stom_section}
-                
-                You should try your best to achieve your goal in a way that aligns with your character traits.
+            template = """
+                Imagine you are {agent}, your task is to act/speak as {agent} would, keeping in mind {agent}'s social goal.
+                You can find {agent}'s goal (or background) in the 'Here is the context of the interaction' field.
+                Note that {agent}'s goal is only visible to you.
+                You should try your best to achieve {agent}'s goal in a way that align with their character traits.
                 Additionally, maintaining the conversation's naturalness and realism is essential (e.g., do not repeat what other people has already said before).
                 {history}.
                 You are at Turn #{turn_number}. Your available action types are
@@ -683,79 +686,22 @@ async def agenerate_action(
                 Please only generate a JSON string including the action type and the argument.
                 Your action should follow the given format:
                 {format_instructions}
-                """
-            else:
-                actual_goal = goal
-                stom_section = ""
-                template = """
-                Imagine you are {agent}, your task is to act/speak as {agent} would, keeping in mind your social goal.
-                
-                Your goal: {goal}
-                
-                You should try your best to achieve your goal in a way that aligns with your character traits.
-                Additionally, maintaining the conversation's naturalness and realism is essential (e.g., do not repeat what other people has already said before).
-                {history}.
-                You are at Turn #{turn_number}. Your available action types are
-                {action_list}.
-                Note: You can "leave" this conversation if 1. you have achieved your social goals, 2. this conversation makes you uncomfortable, 3. you find it uninteresting/you lose your patience, 4. or for other reasons you want to leave.
-
-                Please only generate a JSON string including the action type and the argument.
-                Your action should follow the given format:
-                {format_instructions}
-                """
-        # 处理SToM信息
-        if "|||STOM_SECTION|||" in goal:
-            actual_goal, stom_section = goal.split("|||STOM_SECTION|||", 1)
-        else:
-            actual_goal = goal
-            stom_section = ""
-            
-        debug_print(f"agenerate_action called with goal: {actual_goal}", verbose)
-        debug_print(f"agenerate_action SToM section: {stom_section}", verbose)
-        debug_print(f"agenerate_action agent: {agent}", verbose)
-        debug_print(f"agenerate_action model_name: {model_name}", verbose)
-        debug_print(f"agenerate_action turn_number: {turn_number}", verbose)
-        debug_print(f"agenerate_action template to be used:\n{template}", verbose)
-        
-        try:
-            # 根据模板构建相应的input_values
-            if "|||STOM_SECTION|||" in goal:
-                # 有SToM信息的情况
-                input_values_dict = dict(
-                    agent=agent,
-                    turn_number=str(turn_number),
-                    history=history,
-                    action_list=" ".join(action_types),
-                    goal=actual_goal,
-                    stom_section=stom_section,
-                )
-            else:
-                # 没有SToM信息的情况，不包含stom_section
-                input_values_dict = dict(
-                    agent=agent,
-                    turn_number=str(turn_number),
-                    history=history,
-                    action_list=" ".join(action_types),
-                    goal=actual_goal,
-                )
-            
-            result = await agenerate(
-                model_name=model_name,
-                template=template,
-                input_values=input_values_dict,
-                output_parser=PydanticOutputParser(pydantic_object=AgentAction),
-                temperature=temperature,
-                bad_output_process_model=bad_output_process_model,
-                use_fixed_model_version=use_fixed_model_version,
-                verbose=verbose,
-            )
-            debug_print(f"agenerate_action completed successfully for agent {agent}", verbose)
-            return result
-        except Exception as e:
-            debug_print(f"agenerate_action EXCEPTION for agent {agent}: {e}", verbose)
-            import traceback
-            traceback.print_exc()
-            raise
+            """
+        return await agenerate(
+            model_name=model_name,
+            template=template,
+            input_values=dict(
+                agent=agent,
+                turn_number=str(turn_number),
+                history=history,
+                action_list=" ".join(action_types),
+            ),
+            output_parser=PydanticOutputParser(pydantic_object=AgentAction),
+            temperature=temperature,
+            bad_output_process_model=bad_output_process_model,
+            use_fixed_model_version=use_fixed_model_version,
+            verbose=verbose,
+        )
     except Exception:
         return AgentAction(action_type="none", argument="")
 

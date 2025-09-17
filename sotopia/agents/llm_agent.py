@@ -14,12 +14,6 @@ from sotopia.messages import AgentAction, Observation
 from sotopia.messages.message_classes import ScriptBackground
 
 
-def debug_print(message: str, verbose: bool = False) -> None:
-    """统一的调试输出函数"""
-    if verbose:
-        print(f"DEBUG - {message}")
-
-
 async def ainput(prompt: str = "") -> str:
     with ThreadPoolExecutor(1, "ainput") as executor:
         return (
@@ -45,6 +39,7 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
         self.model_name = model_name
         self.script_like = script_like
         self.verbose = verbose
+        self.goal_visibility_system = None  # Will be set by server if needed
 
     @property
     def goal(self) -> str:
@@ -65,10 +60,8 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
 
     async def aact(self, obs: Observation) -> AgentAction:
         self.recv_message("Environment", obs)
-        debug_print(f"LLMAgent.aact called with verbose={self.verbose}", self.verbose)
 
         if self._goal is None:
-            debug_print(f"About to call agenerate_goal with verbose={self.verbose}", self.verbose)
             self._goal = await agenerate_goal(
                 self.model_name,
                 background=self.inbox[0][
@@ -80,10 +73,52 @@ class LLMAgent(BaseAgent[Observation, AgentAction]):
         if len(obs.available_actions) == 1 and "none" in obs.available_actions:
             return AgentAction(action_type="none", argument="")
         else:
-            debug_print(f"About to call agenerate_action with verbose={self.verbose}", self.verbose)
+            
+            # Build base history
+            base_history = "\n".join(f"{y.to_natural_language()}" for x, y in self.inbox)
+            
+            # Add SToM section if this agent has extra visibility
+            enhanced_history = base_history
+            if self.goal_visibility_system and hasattr(self.goal_visibility_system, 'agent_has_stom'):
+                if self.goal_visibility_system.agent_has_stom(self.agent_name):
+                    # Find partner name from multiple sources
+                    partner_name = None
+                    
+                    # Method 1: Look for other agent names in the conversation
+                    if len(self.inbox) > 0:
+                        for sender, message in self.inbox:
+                            if sender != "Environment" and sender != self.agent_name:
+                                partner_name = sender
+                                break
+                    
+                    # Method 2: Get partner from agent_order if available
+                    if not partner_name and hasattr(self.goal_visibility_system, 'agent_order'):
+                        agent_order = self.goal_visibility_system.agent_order
+                        if len(agent_order) >= 2:
+                            for agent in agent_order:
+                                if agent != self.agent_name:
+                                    partner_name = agent
+                                    break
+                    
+                    # Method 3: If no conversation yet, try to get from SToM distributions  
+                    if not partner_name and hasattr(self.goal_visibility_system, 'stom_system'):
+                        # Get all stored distributions and find the one for this agent
+                        distributions = getattr(self.goal_visibility_system.stom_system, 'intention_distributions', {})
+                        for key in distributions:
+                            if key.startswith(f"{self.agent_name}_about_"):
+                                partner_name = key.split("_about_")[1]
+                                break
+                    
+                    if partner_name:
+                        stom_section = self.goal_visibility_system.get_stom_section(self.agent_name, partner_name)
+                        if stom_section:
+                            enhanced_history = f"{base_history}\n\n{stom_section}"
+                    elif self.verbose:
+                        print(f"\n⚠️  SToM: No partner found for {self.agent_name} to reason about (Turn #{obs.turn_number})\n")
+            
             action = await agenerate_action(
                 self.model_name,
-                history="\n".join(f"{y.to_natural_language()}" for x, y in self.inbox),
+                history=enhanced_history,
                 turn_number=obs.turn_number,
                 action_types=obs.available_actions,
                 agent=self.agent_name,

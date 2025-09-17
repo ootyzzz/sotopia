@@ -38,8 +38,8 @@ from sotopia_conf.gin_utils import parse_gin_flags, run
 
 def debug_print(message: str, verbose: bool = False) -> None:
     """统一的调试输出函数"""
-    if verbose:
-        print(f"DEBUG - {message}")
+    # Debug output disabled
+    pass
 
 
 _DEFAULT_GIN_SEARCH_PATHS = [
@@ -111,8 +111,8 @@ def _sample_env_agent_combo_and_push_to_db(env_id: str) -> None:
 
 def debug_print(message: str, verbose: bool = False) -> None:
     """统一的调试输出函数"""
-    if verbose:
-        print(f"DEBUG - {message}")
+    # Debug output disabled
+    pass
 
 
 @gin.configurable
