@@ -86,7 +86,7 @@ class IntentionDistribution:
         
         most_likely, confidence_level = self.get_most_likely_intention()
         
-        confidence_text = "高" if self.confidence > 0.7 else "中" if self.confidence > 0.4 else "低"
+        confidence_text = "HIGH" if self.confidence > 0.7 else "MED" if self.confidence > 0.4 else "LOW"
         
         return f"""
 === 🧠 THEORY OF MIND (SToM) SECTION ===

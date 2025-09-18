@@ -1,6 +1,7 @@
 from typing import Dict, Optional
 from enum import Enum
 from .stom import SToMSystem
+import gin
 
 
 class VisGoalMode(Enum):
@@ -8,9 +9,10 @@ class VisGoalMode(Enum):
     BOTH = "both"
     AGENT1 = "agent1"  # agent1 has extra visibility and can see agent2's goal -> only agent1 uses SToM
     AGENT2 = "agent2"  # agent2 has extra visibility and can see agent1's goal -> only agent2 uses SToM
-    STOM = "stom"  # Legacy explicit SToM mode
+    STOM = "stom"     # same as "both", but explicitly names the SToM feature
 
 
+@gin.configurable
 class GoalVisibilitySystem:
     def __init__(self, vis_goal_mode: str, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False):
         self.mode = VisGoalMode(vis_goal_mode)  # 使用枚举确保类型安全

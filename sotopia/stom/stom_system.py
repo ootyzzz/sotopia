@@ -3,8 +3,10 @@ from typing import Optional, Tuple
 from .data_structures import IntentionDistribution
 from .intention_model import IntentionModel
 from .likelihood_model import LikelihoodModel
+import gin
 
 
+@gin.configurable
 class SToMSystem:
     """
     随机心智理论系统 - 统一管理意图建模和更新
@@ -14,11 +16,12 @@ class SToMSystem:
     2. 更新：使用LHM根据新观察进行贝叶斯更新
     """
     
-    def __init__(self, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False):
+    def __init__(self, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False,
+                 temperature: float = 0.0, prompt_template: str = None):
         self.model_name = model_name
         self.verbose = verbose
-        self.intention_model = IntentionModel(model_name, verbose)
-        self.likelihood_model = LikelihoodModel(model_name, verbose)
+        self.intention_model = IntentionModel(model_name, verbose, prompt_template, temperature)
+        self.likelihood_model = LikelihoodModel(model_name, verbose, temperature)
         
         # 存储每个agent对其partner的意图分布
         self.intention_distributions = {}

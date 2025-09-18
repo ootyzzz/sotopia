@@ -2,14 +2,18 @@ import asyncio
 from typing import List
 from sotopia.generation_utils.generate import agenerate, StrOutputParser
 from .data_structures import IntentionDistribution
+import gin
 
 
+@gin.configurable
 class LikelihoodModel:
     """似然模型 - 根据新的对话内容更新意图概率"""
     
-    def __init__(self, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False):
+    def __init__(self, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False, 
+                 temperature: float = 0.0):
         self.model_name = model_name
         self.verbose = verbose
+        self.temperature = temperature
     
     async def compute_likelihoods(
         self,
@@ -51,10 +55,14 @@ class LikelihoodModel:
 **Your Task:**
 For each intention hypothesis listed above, estimate the likelihood that {partner_name} would take this specific action if they truly had that intention. 
 
-Consider:
-- How well does this action align with achieving that intention?
-- Is this action strategically consistent with that goal?
-- Does the timing and context make sense for that intention?
+RULES FOR ASSESSMENT:
+- DO NOT simply follow the opponent's logic or wording. Always question whether their action hides a potentially contradicting intention. 
+- DO NOT confuse polite or agreeable wording with genuine cooperation. Friendliness in tone is irrelevant; focus ONLY on whether the action actually advances or blocks my original goal. 
+- ALWAYS evaluate strictly from the perspective of {agent_name}’s original goal. Do not reframe the evaluation from {partner_name}’s perspective. 
+- Any compromise, partial alignment, delay, or diversion that does not directly and fully realize {agent_name}’s goal must be classified as conflicting. 
+- ASSIGN high likelihood to cooperation ONLY if the action directly and effectively advances my goal without conditions. Otherwise, classify as conflict or neutral. 
+- PRIORITIZE conflict detection: if both cooperative and conflicting signals appear, classify the action as conflicting. 
+- Your responsibility is to expose contradictions, not to be persuaded by agreeable language.
 
 **Output Format:**
 Provide only the likelihood values (0.0 to 1.0) for each intention, one per line:
@@ -99,7 +107,7 @@ Your likelihood assessments:"""
                 },
                 output_parser=StrOutputParser(),
                 verbose=True,  # Always show LHM output
-                temperature=0.0  # 确保输出稳定
+                temperature=self.temperature
             )
             
             if self.verbose:

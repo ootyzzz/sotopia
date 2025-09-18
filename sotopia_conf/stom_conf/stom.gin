@@ -1,0 +1,77 @@
+# SToM (Stochastic Theory of Mind) Configuration
+# This file configures the SToM system used for intention modeling and belief updating
+
+from __gin__ import dynamic_registration
+import sotopia.stom as stom
+import sotopia.goal_visibility as goal_visibility
+
+# ===== CORE CONFIGURATION =====
+# SToM model configuration
+STOM_MODEL = "deepseek/deepseek-chat-v3.1"
+STOM_TEMPERATURE = 0.0
+STOM_VERBOSE = False
+
+# ===== PROMPT TEMPLATES =====
+# Intention Model prompt template
+IM_PROMPT_TEMPLATE = """You are an Intention Model (IM).
+Given a scenario description and my goal, infer a probability distribution over my partner's possible hidden intentions.
+
+Requirements:
+1. The output must be a complete, non-overlapping distribution, and the probabilities must sum to exactly 1.
+2. Use the following fixed top-level categories:
+   [Conflict] Contradicts my goal
+   [Neutral] Neither supports nor opposes my goal
+   [Cooperative] Supports or agrees with my goal
+   [Irrelevant] Completely unrelated to the task
+3. For [Conflict]: expand into about 3 most probable specific subcases (not including [Conflict]-other).  
+   For [Neutral], [Cooperative], and [Irrelevant]: expand into 1–2 common subcases; all remaining cases should be grouped under "other."
+4. Ordering: list the most likely [Conflict] subcases first, then [Neutral], then [Cooperative], then [Irrelevant].
+5. Strict output format:
+   [Category] specific intention description probability
+6. Probabilities must be decimals between 0 and 1 and normalized to sum exactly to 1.
+7. Do not provide explanations or commentary. Only output the distribution.
+
+**Context for Analysis:**
+- Scenario involves {agent_name} and {partner_name}
+- You need to infer {partner_name}'s possible intentions from {agent_name}'s perspective
+
+**Input Information:**
+{final_prompt}
+
+**Required Output Format:**
+[Conflict] specific description probability
+[Conflict] specific description probability
+[Conflict] specific description probability
+[Conflict] other probability
+[Neutral] specific description probability
+[Neutral] other probability
+[Cooperative] specific description probability
+[Cooperative] other probability
+[Irrelevant] specific description probability
+[Irrelevant] other probability
+
+Your distribution:"""
+
+# ===== SYSTEM CONFIGURATION =====
+# Configure the SToM system components
+stom.IntentionModel:
+    model_name = %STOM_MODEL
+    temperature = %STOM_TEMPERATURE
+    prompt_template = %IM_PROMPT_TEMPLATE
+    verbose = %STOM_VERBOSE
+
+stom.LikelihoodModel:
+    model_name = %STOM_MODEL
+    temperature = %STOM_TEMPERATURE
+    verbose = %STOM_VERBOSE
+
+stom.SToMSystem:
+    model_name = %STOM_MODEL
+    temperature = %STOM_TEMPERATURE
+    prompt_template = %IM_PROMPT_TEMPLATE
+    verbose = %STOM_VERBOSE
+
+# Configure the Goal Visibility System
+goal_visibility.GoalVisibilitySystem:
+    model_name = %STOM_MODEL
+    verbose = %STOM_VERBOSE

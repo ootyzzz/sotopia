@@ -233,14 +233,16 @@ async def arun_one_episode(
                             partner_action = agent_messages[partner_name]
                             partner_action_str = partner_action.to_natural_language()
                             
-                            # Check if it's a meaningful action (not "did nothing" or similar)
+                            # Check if it's a meaningful action (not "did nothing", "left the conversation", or similar)
                             is_meaningful_action = True
                             if partner_action_str:
                                 action_lower = partner_action_str.lower().strip()
                                 if ("did nothing" in action_lower or 
                                     "no action" in action_lower or 
+                                    "left the conversation" in action_lower or
                                     action_lower in ["", "none"] or
-                                    action_lower.endswith(": ")):
+                                    action_lower.endswith(": ") or
+                                    action_lower.endswith(":")):
                                     is_meaningful_action = False
                             else:
                                 is_meaningful_action = False

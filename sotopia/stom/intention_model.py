@@ -2,25 +2,23 @@ import asyncio
 from typing import List, Tuple
 from sotopia.generation_utils.generate import agenerate, StrOutputParser
 from .data_structures import IntentionDistribution
+import gin
 
 
+@gin.configurable
 class IntentionModel:
     """意图模型 - 负责初始化意图类别和概率分布"""
     
-    def __init__(self, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False):
+    def __init__(self, model_name: str = "gpt-4o-2024-08-06", verbose: bool = False, 
+                 prompt_template: str = None, temperature: float = 0.0):
         self.model_name = model_name
         self.verbose = verbose
+        self.temperature = temperature
+        self.prompt_template = prompt_template or self._get_default_template()
     
-    async def initialize_intentions(
-        self, 
-        agent_name: str, 
-        partner_name: str, 
-        final_prompt: str
-    ) -> IntentionDistribution:
-        """
-        基于agent的final prompt初始化伙伴意图分布
-        """
-        template = """You are an Intention Model (IM).
+    def _get_default_template(self) -> str:
+        """返回默认的IM prompt模板"""
+        return """You are an Intention Model (IM).
 Given a scenario description and my goal, infer a probability distribution over my partner's possible hidden intentions.
 
 Requirements:
@@ -58,14 +56,23 @@ Requirements:
 [Irrelevant] other probability
 
 Your distribution:"""
-
+    
+    async def initialize_intentions(
+        self, 
+        agent_name: str, 
+        partner_name: str, 
+        final_prompt: str
+    ) -> IntentionDistribution:
+        """
+        基于agent的final prompt初始化伙伴意图分布
+        """
         try:
             if self.verbose:
                 print(f"🧠 SToM: Initializing intentions for {partner_name} from {agent_name}'s perspective")
             
             result = await agenerate(
                 model_name=self.model_name,
-                template=template,
+                template=self.prompt_template,
                 input_values={
                     "agent_name": agent_name,
                     "partner_name": partner_name,
@@ -73,7 +80,7 @@ Your distribution:"""
                 },
                 output_parser=StrOutputParser(),
                 verbose=self.verbose,
-                temperature=0.0  # 确保输出稳定
+                temperature=self.temperature
             )
             
             # 解析输出
